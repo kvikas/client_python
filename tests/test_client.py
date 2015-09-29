@@ -4,12 +4,7 @@ import threading
 import time
 import unittest
 
-
-from prometheus_client import Gauge, Counter, Summary, Histogram, Metric
-from prometheus_client import CollectorRegistry, generate_latest, ProcessCollector
-from prometheus_client import push_to_gateway, pushadd_to_gateway, delete_from_gateway
-from prometheus_client import CONTENT_TYPE_LATEST, instance_ip_grouping_key
-
+from prometheus_client.core import *
 
 class TestCounter(unittest.TestCase):
     def setUp(self):
@@ -293,6 +288,85 @@ class TestMetricWrapper(unittest.TestCase):
         self.assertRaises(ValueError, Counter, 'c', '', labelnames=['^'])
         self.assertRaises(ValueError, Counter, 'c', '', labelnames=['__reserved'])
         self.assertRaises(ValueError, Summary, 'c', '', labelnames=['quantile'])
+
+
+class TestMetricFamilies(unittest.TestCase):
+    def setUp(self):
+        self.registry = CollectorRegistry()
+
+    def custom_collector(self, metric_family):
+        class CustomCollector(object):
+            def collect(self):
+                return [metric_family]
+        self.registry.register(CustomCollector())
+
+    def test_counter(self):
+        self.custom_collector(CounterMetricFamily('c', 'help', value=1))
+        self.assertEqual(1, self.registry.get_sample_value('c', {}))
+
+    def test_counter_labels(self):
+        cmf = CounterMetricFamily('c', 'help', labels=['a', 'c'])
+        cmf.add_metric(['b', 'd'], 2)
+        self.custom_collector(cmf)
+        self.assertEqual(2, self.registry.get_sample_value('c', {'a': 'b', 'c': 'd'}))
+
+    def test_gauge(self):
+        self.custom_collector(GaugeMetricFamily('g', 'help', value=1))
+        self.assertEqual(1, self.registry.get_sample_value('g', {}))
+
+    def test_gauge_labels(self):
+        cmf = GaugeMetricFamily('g', 'help', labels=['a'])
+        cmf.add_metric(['b'], 2)
+        self.custom_collector(cmf)
+        self.assertEqual(2, self.registry.get_sample_value('g', {'a':'b'}))
+
+    def test_summary(self):
+        self.custom_collector(SummaryMetricFamily('s', 'help', count_value=1, sum_value=2))
+        self.assertEqual(1, self.registry.get_sample_value('s_count', {}))
+        self.assertEqual(2, self.registry.get_sample_value('s_sum', {}))
+
+    def test_summary_labels(self):
+        cmf = SummaryMetricFamily('s', 'help', labels=['a'])
+        cmf.add_metric(['b'], count_value=1, sum_value=2)
+        self.custom_collector(cmf)
+        self.assertEqual(1, self.registry.get_sample_value('s_count', {'a': 'b'}))
+        self.assertEqual(2, self.registry.get_sample_value('s_sum', {'a': 'b'}))
+
+    def test_histogram(self):
+        self.custom_collector(HistogramMetricFamily('h', 'help', buckets=[('0', 1), ('+Inf', 2)], sum_value=3))
+        self.assertEqual(1, self.registry.get_sample_value('h_bucket', {'le': '0'}))
+        self.assertEqual(2, self.registry.get_sample_value('h_bucket', {'le': '+Inf'}))
+        self.assertEqual(2, self.registry.get_sample_value('h_count', {}))
+        self.assertEqual(3, self.registry.get_sample_value('h_sum', {}))
+
+    def test_histogram_labels(self):
+        cmf = HistogramMetricFamily('h', 'help', labels=['a'])
+        cmf.add_metric(['b'], buckets=[('0', 1), ('+Inf', 2)], sum_value=3)
+        self.custom_collector(cmf)
+        self.assertEqual(1, self.registry.get_sample_value('h_bucket', {'a': 'b', 'le': '0'}))
+        self.assertEqual(2, self.registry.get_sample_value('h_bucket', {'a': 'b', 'le': '+Inf'}))
+        self.assertEqual(2, self.registry.get_sample_value('h_count', {'a': 'b'}))
+        self.assertEqual(3, self.registry.get_sample_value('h_sum', {'a': 'b'}))
+
+    def test_bad_constructors(self):
+        self.assertRaises(ValueError, CounterMetricFamily, 'c', 'help', value=1, labels=[])
+        self.assertRaises(ValueError, CounterMetricFamily, 'c', 'help', value=1, labels=['a'])
+
+        self.assertRaises(ValueError, GaugeMetricFamily, 'g', 'help', value=1, labels=[])
+        self.assertRaises(ValueError, GaugeMetricFamily, 'g', 'help', value=1, labels=['a'])
+
+        self.assertRaises(ValueError, SummaryMetricFamily, 's', 'help', sum_value=1)
+        self.assertRaises(ValueError, SummaryMetricFamily, 's', 'help', count_value=1)
+        self.assertRaises(ValueError, SummaryMetricFamily, 's', 'help', count_value=1, labels=['a'])
+        self.assertRaises(ValueError, SummaryMetricFamily, 's', 'help', sum_value=1, labels=['a'])
+        self.assertRaises(ValueError, SummaryMetricFamily, 's', 'help', count_value=1, sum_value=1, labels=['a'])
+
+        self.assertRaises(ValueError, HistogramMetricFamily, 'h', 'help', sum_value=1)
+        self.assertRaises(ValueError, HistogramMetricFamily, 'h', 'help', buckets={})
+        self.assertRaises(ValueError, HistogramMetricFamily, 'h', 'help', sum_value=1, labels=['a'])
+        self.assertRaises(ValueError, HistogramMetricFamily, 'h', 'help', buckets={}, labels=['a'])
+        self.assertRaises(ValueError, HistogramMetricFamily, 'h', 'help', buckets={}, sum_value=1, labels=['a'])
+        self.assertRaises(KeyError, HistogramMetricFamily, 'h', 'help', buckets={}, sum_value=1)
 
 
 if __name__ == '__main__':
