@@ -5,7 +5,7 @@ import time
 import unittest
 
 
-from prometheus_client import Gauge, Counter, Summary, Metric
+from prometheus_client import Gauge, Counter, Summary, Histogram, Metric
 from prometheus_client import CollectorRegistry, generate_latest
 from prometheus_client import push_to_gateway, pushadd_to_gateway, delete_from_gateway
 from prometheus_client import CONTENT_TYPE_LATEST, instance_ip_grouping_key
@@ -37,6 +37,30 @@ class TestGenerateText(unittest.TestCase):
         s = Summary('ss', 'A summary', ['a', 'b'], registry=self.registry)
         s.labels('c', 'd').observe(17)
         self.assertEqual(b'# HELP ss A summary\n# TYPE ss summary\nss_count{a="c",b="d"} 1.0\nss_sum{a="c",b="d"} 17.0\n', generate_latest(self.registry))
+
+    def test_histogram(self):
+        s = Histogram('hh', 'A histogram', registry=self.registry)
+        s.observe(0.05)
+        self.assertEqual(b'''# HELP hh A histogram
+# TYPE hh histogram
+hh_bucket{le="0.005"} 0.0
+hh_bucket{le="0.01"} 0.0
+hh_bucket{le="0.025"} 0.0
+hh_bucket{le="0.05"} 1.0
+hh_bucket{le="0.075"} 1.0
+hh_bucket{le="0.1"} 1.0
+hh_bucket{le="0.25"} 1.0
+hh_bucket{le="0.5"} 1.0
+hh_bucket{le="0.75"} 1.0
+hh_bucket{le="1.0"} 1.0
+hh_bucket{le="2.5"} 1.0
+hh_bucket{le="5.0"} 1.0
+hh_bucket{le="7.5"} 1.0
+hh_bucket{le="10.0"} 1.0
+hh_bucket{le="+Inf"} 1.0
+hh_count 1.0
+hh_sum 0.05
+''', generate_latest(self.registry))
 
     def test_unicode(self):
         c = Counter('cc', '\u4500', ['l'], registry=self.registry)
